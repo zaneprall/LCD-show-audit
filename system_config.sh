@@ -1,40 +1,39 @@
 #!/bin/bash
 
-big_version=`lsb_release -r | awk -F ' '  '{printf $NF}'`
-deb_version=`cat /etc/debian_version | tr -d '\n'`
-hw_result=`tr -d '\0' < /proc/device-tree/model`
-
-if [ $(getconf WORD_BIT) = '32' ] && [ $(getconf LONG_BIT) = '64' ] ; then
-hardware_arch=64
-else
-hardware_arch=32
+# Ensure the script is run as root
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 
+   exit 1
 fi
 
-if [[ $hw_result == *"Raspberry Pi 5"* ]]; then
-hardware_model=5
-else
+# Gather system information
+big_version=$(lsb_release -r | awk '{print $2}')
+deb_version=$(tr -d '\n' < /etc/debian_version)
+hardware_arch=$(getconf LONG_BIT)
+hw_result=$(tr -d '\0' < /proc/device-tree/model)
+
+# Determine hardware model
 hardware_model=255
+if [[ $hw_result == *"Raspberry Pi 5"* ]]; then
+    hardware_model=5
 fi
 
-sudo raspi-config nonint do_wayland W1
+# Configure Wayland and handle symbolic links
+raspi-config nonint do_wayland W1
 if [ -f /boot/firmware/config.txt ]; then
-sudo ln -sf /boot/firmware/config.txt /boot/config.txt
+    ln -sf /boot/firmware/config.txt /boot/config.txt
 fi
 
+# Select configuration file based on architecture and Debian version
+config_base="./boot/config-normal"
 if [ $hardware_arch -eq 32 ]; then
-if [ $(($big_version)) -lt 10 ]; then
-sudo cp -rf ./boot/config-nomal-10.9-32.txt ./boot/config.txt.bak
-else
-if [[ "$deb_version" < "10.9" ]] || [[ "$deb_version" = "10.9" ]]; then
-sudo cp -rf ./boot/config-nomal-10.9-32.txt ./boot/config.txt.bak
-elif [[ "$deb_version" < "12.1" ]]; then
-sudo cp -rf ./boot/config-nomal-11.4-32.txt ./boot/config.txt.bak
-else
-sudo cp -rf ./boot/config-nomal-12.1-32.txt ./boot/config.txt.bak
-fi
-fi
+    config_version="10.9-32"
+    [[ $(bc <<< "$deb_version < 10.9") -eq 1 ]] && config_version="10.9-32"
+    [[ $(bc <<< "$deb_version >= 10.9 && $deb_version < 11.4") -eq 1 ]] && config_version="11.4-32"
+    [[ $(bc <<< "$deb_version >= 12.1") -eq 1 ]] && config_version="12.1-32"
 elif [ $hardware_arch -eq 64 ]; then
-sudo cp -rf ./boot/config-nomal-11.4-64.txt ./boot/config.txt.bak
+    config_version="11.4-64"
 fi
+cp -rf "${config_base}-${config_version}.txt" /boot/config.txt.bak
 
-
+echo "Configuration set for Debian $deb_version on $hardware_arch-bit architecture."
